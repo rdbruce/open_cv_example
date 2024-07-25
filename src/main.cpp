@@ -9,6 +9,21 @@
 using namespace cv;
 using namespace std;
 
+void centerOn(Mat image, Mat &translated_image, KeyPoint cPoint)
+{
+    int width = image.rows;
+    int height = image.cols;
+    cout << "img size (" << width << "," << height << ")" << endl;
+    cout << "cpoint (" << cPoint.pt.x << "," << cPoint.pt.y << ")" << endl;
+    float tx = float(width)/2 - cPoint.pt.x;
+    float ty = float(height)/2 - cPoint.pt.y; 
+    cout << "translate by (" << tx << "," << ty << ")" << endl;
+
+    float warp_values[] = { 1.0, 0.0, tx, 0.0, 1.0, ty };
+    Mat translation_matrix = Mat(2, 3, CV_32F, warp_values);
+    warpAffine(image, translated_image, translation_matrix, image.size());   
+}
+
 int main(int argc, char* argv[])
 {
     Mat original, blur, bin, hsv, out;
@@ -60,6 +75,11 @@ int main(int argc, char* argv[])
         }
     }
 
+    namedWindow("Input Image"); // Show the result
+    namedWindow("Plane 2");
+    namedWindow("Bin");
+    namedWindow("Output");
+
     for (;;)
     {
         // wait for a new frame from camera and store it into 'frame'
@@ -71,7 +91,7 @@ int main(int argc, char* argv[])
             break;
         }
 
-        cvtColor(original, hsv, COLOR_RGB2HSV);
+        // cvtColor(original, hsv, COLOR_RGB2HSV);
 
         // split img:
         split(original, channels);
@@ -86,16 +106,28 @@ int main(int argc, char* argv[])
         // Detect blobs
         detector->detect(bin, keypoints);
 
-        cout << keypoints.size() << " keypoints" << endl;
-        
         // Draw detected blobs as red circles.
         // DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
-        drawKeypoints( bin, keypoints, out, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
+        drawKeypoints( bin, keypoints, bin, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
 
         imshow("Input Image", original); // Show the result
         imshow("Plane 2", channels[2]);
         imshow("Bin", bin);
-        imshow("Output", out);
+
+        if(keypoints.size() == 1)
+        {
+            centerOn(bin, out, keypoints[0]);
+            Point ptShift(30.0,30.0);
+            Point toShift = keypoints[0].pt;
+            // rectangle(bin, keypoints[0].pt, ptShift + toShift, 255);
+            imshow("Output", out);
+        }
+        else
+        {
+            cout << "fuck keypoints" << endl;
+            // out = bin;
+        }
+
         // imshow("Blur", blur);
         if (waitKey(25) >= 0)
         {
