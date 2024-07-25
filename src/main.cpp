@@ -11,8 +11,8 @@ using namespace std;
 
 void centerOn(Mat image, Mat &translated_image, KeyPoint cPoint)
 {
-    int width = image.rows;
-    int height = image.cols;
+    int width = image.cols;
+    int height = image.rows;
     cout << "img size (" << width << "," << height << ")" << endl;
     cout << "cpoint (" << cPoint.pt.x << "," << cPoint.pt.y << ")" << endl;
     float tx = float(width)/2 - cPoint.pt.x;
