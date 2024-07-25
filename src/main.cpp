@@ -2,88 +2,102 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
+#include <opencv2/features2d.hpp>
 
 #include <iostream>
 
 using namespace cv;
 using namespace std;
 
-int main()
+int main(int argc, char* argv[])
 {
-    Mat I, padded, complexI, magI;
-    int m, n;
-    int cx, cy;
+    Mat original, blur, bin, hsv, out;
+
+    vector<Mat> channels(3);
+
+    // Setup SimpleBlobDetector parameters.
+    SimpleBlobDetector::Params params;
+    
+    // Filter by Circularity
+    params.filterByCircularity = true;
+    params.minCircularity = 0.5;
+    
+    // Filter by Convexity
+    params.filterByConvexity = true;
+    params.maxConvexity = 0.1;
+    
+    // Filter by Inertia
+    params.filterByInertia = true;
+    params.minInertiaRatio = 0.01;
+
+    // Set up the detector with default parameters.
+    Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create();
+
+    vector<KeyPoint> keypoints;
 
     VideoCapture cap;
 
-    int deviceID = 0;        // 0 = open default camera
-    int apiID = cv::CAP_ANY; // 0 = autodetect default API
-    // open selected camera using selected API
-    cap.open(deviceID, apiID);
-    // check if we succeeded
-    if (!cap.isOpened())
+    if(argc >= 2)
     {
-        cerr << "ERROR! Unable to open camera\n";
-        return -1;
+        cap.open("../../IMG_3783.MP4");
+        if (!cap.isOpened())
+        {
+            cerr << "ERROR! Unable to open image\n";
+            return -1;
+        }
+    }
+    else
+    {
+        int deviceID = 0;        // 0 = open default camera
+        int apiID = cv::CAP_ANY; // 0 = autodetect default API
+        // open selected camera using selected API
+        cap.open(deviceID, apiID);
+        // check if we succeeded
+        if (!cap.isOpened())
+        {
+            cerr << "ERROR! Unable to open camera\n";
+            return -1;
+        }
     }
 
     for (;;)
     {
         // wait for a new frame from camera and store it into 'frame'
-        cap.read(I);
+        cap.read(original);
         // check if we succeeded
-        if (I.empty())
+        if (original.empty())
         {
             cerr << "ERROR! blank frame grabbed\n";
             break;
         }
 
-        m = getOptimalDFTSize(I.rows);
-        n = getOptimalDFTSize(I.cols); // on the border add zero values
-        copyMakeBorder(I, padded, 0, m - I.rows, 0, n - I.cols, BORDER_CONSTANT, Scalar::all(0));
+        cvtColor(original, hsv, COLOR_RGB2HSV);
 
-        cvtColor(padded, padded, cv::COLOR_RGB2GRAY);
-        Mat planes[] = {Mat_<float>(padded), Mat::zeros(padded.size(), CV_32F)};
-        merge(planes, 2, complexI); // Add to the expanded another plane with zeros
+        // split img:
+        split(original, channels);
 
-        dft(complexI, complexI); // this way the result may fit in the source matrix
+        // blur = cv.GaussianBlur(channels[2],(5,5),0)
+        // boxFilter(channels[2], blur, -1, Size(30, 30));
+        
+        // adaptiveThreshold(I, I, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 17, 0);
+        // threshold( channels[2], bin, threshold_value, max_binary_value, THRESH_OTSU );
+        threshold( channels[2], bin, 245, 255, THRESH_BINARY_INV );
+        
+        // Detect blobs
+        detector->detect(bin, keypoints);
 
-        // compute the magnitude and switch to logarithmic scale
-        // => log(1 + sqrt(Re(DFT(I))^2 + Im(DFT(I))^2))
-        split(complexI, planes);                    // planes[0] = Re(DFT(I), planes[1] = Im(DFT(I))
-        magnitude(planes[0], planes[1], planes[0]); // planes[0] = magnitude
-        magI = planes[0];
+        cout << keypoints.size() << " keypoints" << endl;
+        
+        // Draw detected blobs as red circles.
+        // DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
+        drawKeypoints( bin, keypoints, out, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
 
-        magI += Scalar::all(1); // switch to logarithmic scale
-        log(magI, magI);
-
-        // crop the spectrum, if it has an odd number of rows or columns
-        magI = magI(Rect(0, 0, magI.cols & -2, magI.rows & -2));
-
-        // rearrange the quadrants of Fourier image so that the origin is at the image center
-        cx = magI.cols / 2;
-        cy = magI.rows / 2;
-
-        Mat q0(magI, Rect(0, 0, cx, cy));   // Top-Left - Create a ROI per quadrant
-        Mat q1(magI, Rect(cx, 0, cx, cy));  // Top-Right
-        Mat q2(magI, Rect(0, cy, cx, cy));  // Bottom-Left
-        Mat q3(magI, Rect(cx, cy, cx, cy)); // Bottom-Right
-
-        Mat tmp; // swap quadrants (Top-Left with Bottom-Right)
-        q0.copyTo(tmp);
-        q3.copyTo(q0);
-        tmp.copyTo(q3);
-
-        q1.copyTo(tmp); // swap quadrant (Top-Right with Bottom-Left)
-        q2.copyTo(q1);
-        tmp.copyTo(q2);
-
-        normalize(magI, magI, 0, 1, NORM_MINMAX); // Transform the matrix with float values into a
-        // viewable image form (float between values 0 and 1).
-
-        imshow("Input Image", I); // Show the result
-        imshow("spectrum magnitude", magI);
-        if (waitKey(5) >= 0)
+        imshow("Input Image", original); // Show the result
+        imshow("Plane 2", channels[2]);
+        imshow("Bin", bin);
+        imshow("Output", out);
+        // imshow("Blur", blur);
+        if (waitKey(25) >= 0)
         {
             break;
         }
