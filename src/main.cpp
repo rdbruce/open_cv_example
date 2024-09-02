@@ -2,134 +2,71 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
-#include <opencv2/features2d.hpp>
 
 #include <iostream>
 
 using namespace cv;
 using namespace std;
 
-void centerOn(Mat image, Mat &translated_image, KeyPoint cPoint)
+Mat dft(Mat I)
 {
-    int width = image.cols;
-    int height = image.rows;
-    cout << "img size (" << width << "," << height << ")" << endl;
-    cout << "cpoint (" << cPoint.pt.x << "," << cPoint.pt.y << ")" << endl;
-    float tx = float(width)/2 - cPoint.pt.x;
-    float ty = float(height)/2 - cPoint.pt.y; 
-    cout << "translate by (" << tx << "," << ty << ")" << endl;
+    Mat padded, complexI;
 
-    float warp_values[] = { 1.0, 0.0, tx, 0.0, 1.0, ty };
-    Mat translation_matrix = Mat(2, 3, CV_32F, warp_values);
-    warpAffine(image, translated_image, translation_matrix, image.size());   
+    auto m = getOptimalDFTSize(I.rows);
+    auto n = getOptimalDFTSize(I.cols); // on the border add zero values
+    copyMakeBorder(I, padded, 0, m - I.rows, 0, n - I.cols, BORDER_CONSTANT, Scalar::all(0));
+
+    Mat planes[] = {Mat_<float>(padded), Mat::zeros(padded.size(), CV_32F)};
+    cv::merge(planes, 2, complexI); // Add to the expanded another plane with zeros
+
+    cv::dft(complexI, complexI); // this way the result may fit in the source matrix
+    return complexI;
 }
 
-int main(int argc, char* argv[])
+int main()
 {
-    Mat original, blur, bin, hsv, out;
-
-    vector<Mat> channels(3);
-
-    // Setup SimpleBlobDetector parameters.
-    SimpleBlobDetector::Params params;
-    
-    // Filter by Circularity
-    params.filterByCircularity = true;
-    params.minCircularity = 0.5;
-    
-    // Filter by Convexity
-    params.filterByConvexity = true;
-    params.maxConvexity = 0.1;
-    
-    // Filter by Inertia
-    params.filterByInertia = true;
-    params.minInertiaRatio = 0.01;
-
-    // Set up the detector with default parameters.
-    Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create();
-
-    vector<KeyPoint> keypoints;
+    Mat input, currentFourier, pastFourier, convMat;
+    int cx, cy;
 
     VideoCapture cap;
 
-    if(argc >= 2)
+    int deviceID = 0;        // 0 = open default camera
+    int apiID = cv::CAP_ANY; // 0 = autodetect default API
+    // open selected camera using selected API
+    cap.open(deviceID, apiID);
+    // check if we succeeded
+    if (!cap.isOpened())
     {
-        cap.open("../../IMG_3783.MP4");
-        if (!cap.isOpened())
-        {
-            cerr << "ERROR! Unable to open image\n";
-            return -1;
-        }
-    }
-    else
-    {
-        int deviceID = 0;        // 0 = open default camera
-        int apiID = cv::CAP_ANY; // 0 = autodetect default API
-        // open selected camera using selected API
-        cap.open(deviceID, apiID);
-        // check if we succeeded
-        if (!cap.isOpened())
-        {
-            cerr << "ERROR! Unable to open camera\n";
-            return -1;
-        }
+        cerr << "ERROR! Unable to open camera\n";
+        return -1;
     }
 
-    namedWindow("Input Image"); // Show the result
-    namedWindow("Plane 2");
-    namedWindow("Bin");
-    namedWindow("Output");
-
-    for (;;)
+    for (int i = 0;; i++)
     {
         // wait for a new frame from camera and store it into 'frame'
-        cap.read(original);
+        cap.read(input);
         // check if we succeeded
-        if (original.empty())
+        if (input.empty())
         {
             cerr << "ERROR! blank frame grabbed\n";
             break;
         }
+        cvtColor(input, input, cv::COLOR_RGB2GRAY);
 
-        // cvtColor(original, hsv, COLOR_RGB2HSV);
+        currentFourier = dft(input);
 
-        // split img:
-        split(original, channels);
-
-        // blur = cv.GaussianBlur(channels[2],(5,5),0)
-        // boxFilter(channels[2], blur, -1, Size(30, 30));
-        
-        // adaptiveThreshold(I, I, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 17, 0);
-        // threshold( channels[2], bin, threshold_value, max_binary_value, THRESH_OTSU );
-        threshold( channels[2], bin, 245, 255, THRESH_BINARY_INV );
-        
-        // Detect blobs
-        detector->detect(bin, keypoints);
-
-        // Draw detected blobs as red circles.
-        // DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
-        drawKeypoints( bin, keypoints, bin, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
-
-        imshow("Input Image", original); // Show the result
-        imshow("Plane 2", channels[2]);
-        imshow("Bin", bin);
-
-        if(keypoints.size() == 1)
+        if(i != 0)
         {
-            centerOn(bin, out, keypoints[0]);
-            Point ptShift(30.0,30.0);
-            Point toShift = keypoints[0].pt;
-            // rectangle(bin, keypoints[0].pt, ptShift + toShift, 255);
-            imshow("Output", out);
-        }
-        else
-        {
-            cout << "fuck keypoints" << endl;
-            // out = bin;
+            mulSpectrums(currentFourier, currentFourier, convMat, 0);
+            cv::dft(convMat, convMat, cv::DFT_INVERSE|cv::DFT_REAL_OUTPUT);
+            normalize(convMat, convMat, 0, 1, NORM_MINMAX);
+            imshow("Input Image", input); // Show the result
+            imshow("spectrum magnitude", convMat);
         }
 
-        // imshow("Blur", blur);
-        if (waitKey(25) >= 0)
+        currentFourier.copyTo(pastFourier);
+
+        if (waitKey(5) >= 0)
         {
             break;
         }
