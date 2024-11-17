@@ -1,3 +1,6 @@
+# open_cv_example
+This is an image stabilization example using OpenCV in C++. The image stabilization works through feature tracking and moving the image to keep those features still. Features are represented in the program by little red dots. When the program is executed a window will pull up. Hit or hold the c key to advance the frames. Hit escape to kill the window. 
+
 ## Build instructions
 These build instructions are an elaboration of [this example](https://blog.conan.io/2023/07/20/introduction-to-game-dev-with-sdl2.html).
 
@@ -30,5 +33,5 @@ Building on Windows
 cmake --preset conan-default
 cmake --build --preset conan-release
 cd build\Release
-final_pendulum.exe
+./opencv_example
 ```
