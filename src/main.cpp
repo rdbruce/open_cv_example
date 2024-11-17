@@ -1,76 +1,103 @@
-#include "opencv2/core.hpp"
-#include "opencv2/imgproc.hpp"
-#include "opencv2/imgcodecs.hpp"
-#include "opencv2/highgui.hpp"
-
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/features2d/features2d.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/video/video.hpp>
 #include <iostream>
 
 using namespace cv;
 using namespace std;
 
-Mat dft(Mat I)
-{
-    Mat padded, complexI;
 
-    auto m = getOptimalDFTSize(I.rows);
-    auto n = getOptimalDFTSize(I.cols); // on the border add zero values
-    copyMakeBorder(I, padded, 0, m - I.rows, 0, n - I.cols, BORDER_CONSTANT, Scalar::all(0));
+class MyTracker {
+    vector<Point2f> trackedFeatures;
+    Mat             prevGray;
+public:
+    bool            freshStart;
+    Mat_<float>     rigidTransform;
 
-    Mat planes[] = {Mat_<float>(padded), Mat::zeros(padded.size(), CV_32F)};
-    cv::merge(planes, 2, complexI); // Add to the expanded another plane with zeros
+    MyTracker():freshStart(true) {
+        rigidTransform = Mat::eye(3,3,CV_32FC1); //affine 2x3 in a 3x3 matrix
+    }
 
-    cv::dft(complexI, complexI); // this way the result may fit in the source matrix
-    return complexI;
-}
+    void processImage(Mat& img) {
+        Mat gray; cvtColor(img,gray,COLOR_BGR2GRAY);
+        vector<Point2f> corners;
+        if(trackedFeatures.size() < 200) {
+            goodFeaturesToTrack(gray,corners,300,0.01,10);
+            cout << "found " << corners.size() << " features\n";
+            for (int i = 0; i < corners.size(); ++i) {
+                trackedFeatures.push_back(corners[i]);
+            }
+        }
 
-int main()
-{
-    Mat input, currentFourier, pastFourier, convMat;
-    int cx, cy;
+        if(!prevGray.empty()) {
+            vector<uchar> status; vector<float> errors;
+            calcOpticalFlowPyrLK(prevGray,gray,trackedFeatures,corners,status,errors,Size(10,10));
 
-    VideoCapture cap;
+            if(countNonZero(status) < status.size() * 0.8) {
+                cout << "cataclysmic error \n";
+                rigidTransform = Mat::eye(3,3,CV_32FC1);
+                trackedFeatures.clear();
+                prevGray.release();
+                freshStart = true;
+                return;
+            } else
+                freshStart = false;
 
-    int deviceID = 0;        // 0 = open default camera
-    int apiID = cv::CAP_ANY; // 0 = autodetect default API
-    // open selected camera using selected API
-    cap.open(deviceID, apiID);
-    // check if we succeeded
-    if (!cap.isOpened())
+            Mat_<float> newRigidTransform = estimateRigidTransform(trackedFeatures,corners,false);
+            Mat_<float> nrt33 = Mat_<float>::eye(3,3);
+            newRigidTransform.copyTo(nrt33.rowRange(0,2));
+            rigidTransform *= nrt33;
+
+            trackedFeatures.clear();
+            for (int i = 0; i < status.size(); ++i) {
+                if(status[i]) {
+                    trackedFeatures.push_back(corners[i]);
+                }
+            }
+        }
+
+        for (int i = 0; i < trackedFeatures.size(); ++i) {
+            circle(img,trackedFeatures[i],3,Scalar(0,0,255),FILLED);
+        }
+
+        gray.copyTo(prevGray);
+    }
+};
+
+
+int main() {
+    VideoCapture vc;
+
+    vc.open("../../IMG_3783.MP4");
+    if (!vc.isOpened())
     {
-        cerr << "ERROR! Unable to open camera\n";
+        cerr << "ERROR! Unable to open image\n";
         return -1;
     }
+    Mat frame,orig,orig_warped,tmp;
 
-    for (int i = 0;; i++)
-    {
-        // wait for a new frame from camera and store it into 'frame'
-        cap.read(input);
-        // check if we succeeded
-        if (input.empty())
-        {
-            cerr << "ERROR! blank frame grabbed\n";
-            break;
-        }
-        cvtColor(input, input, cv::COLOR_RGB2GRAY);
+    MyTracker tracker;
 
-        currentFourier = dft(input);
+    while(vc.isOpened()) {
+        vc >> frame;
+        if(frame.empty()) break;
+        frame.copyTo(orig);
 
-        if(i != 0)
-        {
-            mulSpectrums(currentFourier, currentFourier, convMat, 0);
-            cv::dft(convMat, convMat, cv::DFT_INVERSE|cv::DFT_REAL_OUTPUT);
-            normalize(convMat, convMat, 0, 1, NORM_MINMAX);
-            imshow("Input Image", input); // Show the result
-            imshow("spectrum magnitude", convMat);
-        }
+        tracker.processImage(orig);
 
-        currentFourier.copyTo(pastFourier);
+        Mat invTrans = tracker.rigidTransform.inv(DECOMP_SVD);
+        warpAffine(orig,orig_warped,invTrans.rowRange(0,2),Size());
 
-        if (waitKey(5) >= 0)
-        {
-            break;
-        }
+        imshow("orig",orig_warped);
+
+        int c = waitKey(0);
+        if(c == ' ') {
+            if(waitKey()==27) break;
+        } else
+            if(c == 27) break;
     }
+    vc.release();
 
-    return EXIT_SUCCESS;
 }
